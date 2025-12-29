@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local benchmark artifacts (avoid /tmp)
+.html5lib-tests-bench/

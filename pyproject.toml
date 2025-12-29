@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "justhtml-html5lib-tests-bench"
+version = "0.1.0"
+description = "Run html5lib-tests parsing tests in real browsers and capture the resulting DOM tree"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "playwright>=1.42",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+]
+
+dev = ["pre-commit>=3.7"]
+
+[project.scripts]
+html5lib-tests-bench = "html5lib_tests_bench.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+
+[tool.setuptools.package-data]
+html5lib_tests_bench = ["py.typed"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+
+[tool.ruff]
+target-version = "py313"
+line-length = 119
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "D203",   # one-blank-line-before-class (conflicts with D211)
+  "D213",   # multi-line-summary-second-line (conflicts with D212)
+  "COM812", # missing-trailing-comma (conflicts with formatter)
+  "ISC001", # single-line-implicit-string-concatenation (conflicts with formatter)
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*.py" = ["S101", "PT"]  # S101: allow assert, PT: we use unittest not pytest
