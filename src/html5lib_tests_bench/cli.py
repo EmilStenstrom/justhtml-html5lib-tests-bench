@@ -4,6 +4,7 @@ import argparse
 import difflib
 import json
 import sys
+import time
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -80,6 +81,7 @@ def _normalize_expected_tree(s: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    started = time.perf_counter()
     ns = _parse_args(argv)
 
     tests = _load_tests(ns.paths)
@@ -188,6 +190,12 @@ def main(argv: list[str] | None = None) -> int:
     for b in browsers:
         s = summary[b]
         print(f"{b}: pass={s['pass']} fail={s['fail']} error={s['error']}")
+
+    elapsed_s = time.perf_counter() - started
+    print(f"elapsed_seconds: {elapsed_s:.3f}")
+
+    if ns.json_out:
+        out_obj["meta"]["elapsed_seconds"] = elapsed_s
 
     # Non-zero exit if any errors (or fails when comparing)
     if any(summary[b]["error"] for b in browsers):
