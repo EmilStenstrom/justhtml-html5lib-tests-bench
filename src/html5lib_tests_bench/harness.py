@@ -12,12 +12,41 @@ _MAX_PLAYWRIGHT_TIMEOUT_MS = 10_000
 
 
 _DOM_TREE_SERIALIZER_JS = r"""
-() => {
+(doc) => {
   const lines = [];
-  const escapeText = (s) => {
-    // Match html5lib test tree format reasonably well.
-    // Use JSON escaping so newlines/tabs are visible.
-    return JSON.stringify(String(s)).slice(1, -1);
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const MATH_NS = "http://www.w3.org/1998/Math/MathML";
+  const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+  const escapeAttr = (s) => {
+    // html5lib tree output is a textual format, not a string literal.
+    // Preserve literal backslashes (so "\\n" stays "\\n") but escape
+    // quotes and control characters for readability.
+    return String(s)
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t")
+      .replace(/\"/g, "\\\"");
+  };
+  // For node data, preserve literal newlines so the output can span multiple
+  // lines like the html5lib tree format.
+  const escapeTextData = (s) => String(s);
+  const escapeCommentData = (s) => String(s);
+
+  const attrDisplayName = (a) => {
+    const prefix = a && a.prefix ? String(a.prefix) : "";
+    const local = a && a.localName ? String(a.localName) : (a && a.name ? String(a.name) : "");
+    const name = a && a.name ? String(a.name) : local;
+    return prefix ? `${prefix} ${local}` : name;
+  };
+
+  const formatTag = (el) => {
+    const ns = el && el.namespaceURI ? String(el.namespaceURI) : "";
+    const local = el && el.localName ? String(el.localName) : "";
+    const name = local || (el && el.tagName ? String(el.tagName).toLowerCase() : "");
+    if (ns === SVG_NS) return `svg ${name}`;
+    if (ns === MATH_NS) return `math ${name}`;
+    return name;
   };
   const indentStr = (depth) => "  ".repeat(depth);
   const add = (depth, txt) => lines.push(`| ${indentStr(depth)}${txt}`);
@@ -28,32 +57,61 @@ _DOM_TREE_SERIALIZER_JS = r"""
     switch (node.nodeType) {
       case Node.DOCUMENT_TYPE_NODE: {
         const name = node.name ? String(node.name) : "";
-        add(depth, `<!DOCTYPE ${name}>`.trimEnd());
+        const publicId = node.publicId ? String(node.publicId) : "";
+        const systemId = node.systemId ? String(node.systemId) : "";
+        if (publicId || systemId) {
+          add(depth, `<!DOCTYPE ${name} "${publicId}" "${systemId}">`.trimEnd());
+        } else {
+          add(depth, `<!DOCTYPE ${name}>`.trimEnd());
+        }
         return;
       }
       case Node.ELEMENT_NODE: {
-        const tag = node.tagName ? String(node.tagName).toLowerCase() : "";
+        const tag = formatTag(node);
         add(depth, `<${tag}>`);
         try {
           const attrs = Array.from(node.attributes || []);
-          attrs.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+          attrs.sort((a, b) => {
+            const an = attrDisplayName(a);
+            const bn = attrDisplayName(b);
+            if (an < bn) return -1;
+            if (an > bn) return 1;
+            return 0;
+          });
           for (const a of attrs) {
-            add(depth + 1, `${a.name}="${escapeText(a.value)}"`);
+            add(depth + 1, `${attrDisplayName(a)}="${escapeAttr(a.value)}"`);
           }
         } catch {
           /* ignore */
         }
+
+        // html5lib-tests treats <template> content as a separate subtree.
+        // In the DOM, template children live under node.content (DocumentFragment).
+        try {
+          const ns = node.namespaceURI ? String(node.namespaceURI) : "";
+          const local = node.localName ? String(node.localName).toLowerCase() : "";
+          if (ns === HTML_NS && local === "template" && node.content) {
+            add(depth + 1, "content");
+            for (const child of Array.from(node.content.childNodes || [])) {
+              serializeNode(child, depth + 2);
+            }
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+
         for (const child of Array.from(node.childNodes || [])) {
           serializeNode(child, depth + 1);
         }
         return;
       }
       case Node.TEXT_NODE: {
-        add(depth, `"${escapeText(node.data)}"`);
+        add(depth, `"${escapeTextData(node.data)}"`);
         return;
       }
       case Node.COMMENT_NODE: {
-        add(depth, `<!-- ${escapeText(node.data)} -->`);
+        add(depth, `<!-- ${escapeCommentData(node.data)} -->`);
         return;
       }
       default:
@@ -61,15 +119,10 @@ _DOM_TREE_SERIALIZER_JS = r"""
     }
   };
 
-  const doc = document;
-  try {
-    if (doc.doctype) serializeNode(doc.doctype, 0);
-  } catch {
-    /* ignore */
-  }
-
-  if (doc.documentElement) {
-    serializeNode(doc.documentElement, 0);
+  // Serialize the document's top-level nodes in order.
+  // This matters for html5lib-tests cases with comments/text before <html>.
+  for (const child of Array.from(doc.childNodes || [])) {
+    serializeNode(child, 0);
   }
 
   return lines.join("\n");
@@ -77,17 +130,52 @@ _DOM_TREE_SERIALIZER_JS = r"""
 """
 
 
+_PARSE_AND_SERIALIZE_DOCUMENT_JS = (
+    r"""(html) => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(html ?? ""), "text/html");
+  const serialize = """ + _DOM_TREE_SERIALIZER_JS + r""";
+  return serialize(doc);
+}"""
+)
+
+
 _FRAGMENT_TREE_SERIALIZER_JS = r"""
 (arg) => {
   const fragmentTag = arg && typeof arg === "object" ? arg.fragmentTag : undefined;
   const html = arg && typeof arg === "object" ? arg.html : undefined;
   const lines = [];
-  const escapeText = (s) => JSON.stringify(String(s)).slice(1, -1);
+  const escapeAttr = (s) => {
+    return String(s)
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t")
+      .replace(/\"/g, "\\\"");
+  };
+  const escapeTextData = (s) => String(s);
+  const escapeCommentData = (s) => String(s);
   const indentStr = (depth) => "  ".repeat(depth);
   const add = (depth, txt) => lines.push(`| ${indentStr(depth)}${txt}`);
 
   const SVG_NS = "http://www.w3.org/2000/svg";
   const MATH_NS = "http://www.w3.org/1998/Math/MathML";
+  const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+  const attrDisplayName = (a) => {
+    const prefix = a && a.prefix ? String(a.prefix) : "";
+    const local = a && a.localName ? String(a.localName) : (a && a.name ? String(a.name) : "");
+    const name = a && a.name ? String(a.name) : local;
+    return prefix ? `${prefix} ${local}` : name;
+  };
+
+  const formatTag = (el) => {
+    const ns = el && el.namespaceURI ? String(el.namespaceURI) : "";
+    const local = el && el.localName ? String(el.localName) : "";
+    const name = local || (el && el.tagName ? String(el.tagName).toLowerCase() : "");
+    if (ns === SVG_NS) return `svg ${name}`;
+    if (ns === MATH_NS) return `math ${name}`;
+    return name;
+  };
 
   const makeContextElement = (ctx) => {
     const raw = ctx ? String(ctx).trim() : "div";
@@ -110,23 +198,44 @@ _FRAGMENT_TREE_SERIALIZER_JS = r"""
     if (!node) return;
     switch (node.nodeType) {
       case Node.ELEMENT_NODE: {
-        const tag = node.tagName ? String(node.tagName).toLowerCase() : "";
+        const tag = formatTag(node);
         add(depth, `<${tag}>`);
         const attrs = Array.from(node.attributes || []);
-        attrs.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        attrs.sort((a, b) => {
+          const an = attrDisplayName(a);
+          const bn = attrDisplayName(b);
+          if (an < bn) return -1;
+          if (an > bn) return 1;
+          return 0;
+        });
         for (const a of attrs) {
-          add(depth + 1, `${a.name}="${escapeText(a.value)}"`);
+          add(depth + 1, `${attrDisplayName(a)}="${escapeAttr(a.value)}"`);
         }
+
+        try {
+          const ns = node.namespaceURI ? String(node.namespaceURI) : "";
+          const local = node.localName ? String(node.localName).toLowerCase() : "";
+          if (ns === HTML_NS && local === "template" && node.content) {
+            add(depth + 1, "content");
+            for (const child of Array.from(node.content.childNodes || [])) {
+              serializeNode(child, depth + 2);
+            }
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+
         for (const child of Array.from(node.childNodes || [])) {
           serializeNode(child, depth + 1);
         }
         return;
       }
       case Node.TEXT_NODE:
-        add(depth, `"${escapeText(node.data)}"`);
+        add(depth, `"${escapeTextData(node.data)}"`);
         return;
       case Node.COMMENT_NODE:
-        add(depth, `<!-- ${escapeText(node.data)} -->`);
+        add(depth, `<!-- ${escapeCommentData(node.data)} -->`);
         return;
       default:
         return;
@@ -152,6 +261,9 @@ _FRAGMENT_TREE_SERIALIZER_JS = r"""
   return lines.join("\n");
 }
 """
+
+
+## NOTE: Fragment parsing is already fast (no navigation) via `_FRAGMENT_TREE_SERIALIZER_JS`.
 
 
 def _is_same_origin(url: str, *, base_url: str) -> bool:
@@ -200,17 +312,22 @@ class BrowserHarness:
         def _route(route) -> None:
             req = route.request
 
-            if req.resource_type == "document" and req.url == self._base_url:
-                route.fulfill(status=200, content_type="text/html", body=self._current_html)
+            # Deterministic runs: block all external network, but record attempts.
+            if req.url.startswith(("http://", "https://")):
+                self._external_network_requests.append(req.url)
+                route.abort()
                 return
 
-            # Deterministic runs: block all network, but record external attempts.
-            if req.url.startswith(("http://", "https://")) and not _is_same_origin(req.url, base_url=self._base_url):
-                self._external_network_requests.append(req.url)
-
-            route.abort()
+            route.continue_()
 
         self._page.route("**/*", _route)
+
+        # Ensure a live DOM exists for fragment parsing/evaluation.
+        self._page.set_content(
+          "<!doctype html><meta charset=\"utf-8\"><title>html5lib-tests-bench</title>",
+          wait_until="domcontentloaded",
+          timeout=_MAX_PLAYWRIGHT_TIMEOUT_MS,
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -226,15 +343,8 @@ class BrowserHarness:
             raise RuntimeError("Harness not initialized")
 
         self._external_network_requests.clear()
-        self._current_html = html
-
-        self._page.goto(
-            self._base_url,
-            wait_until="domcontentloaded",
-            timeout=_MAX_PLAYWRIGHT_TIMEOUT_MS,
-        )
-
-        tree = str(self._page.evaluate(_DOM_TREE_SERIALIZER_JS) or "")
+        # Fast path: parse/serialize in-memory via DOMParser to avoid navigation.
+        tree = str(self._page.evaluate(_PARSE_AND_SERIALIZE_DOCUMENT_JS, html) or "")
         return BrowserResult(tree=tree, external_requests=list(self._external_network_requests))
 
     def run_fragment(self, *, fragment_context: str, html: str) -> BrowserResult:
@@ -242,13 +352,5 @@ class BrowserHarness:
             raise RuntimeError("Harness not initialized")
 
         self._external_network_requests.clear()
-        # Load an empty base document.
-        self._current_html = "<!doctype html><meta charset=\"utf-8\"><title>html5lib-tests-bench</title>"
-        self._page.goto(
-            self._base_url,
-            wait_until="domcontentloaded",
-            timeout=_MAX_PLAYWRIGHT_TIMEOUT_MS,
-        )
-
         tree = str(self._page.evaluate(_FRAGMENT_TREE_SERIALIZER_JS, {"fragmentTag": fragment_context, "html": html}) or "")
         return BrowserResult(tree=tree, external_requests=list(self._external_network_requests))

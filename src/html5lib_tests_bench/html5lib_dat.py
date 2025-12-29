@@ -32,7 +32,10 @@ def _finalize_test(
 
     if fragment_lines:
         fragment_context = fragment_lines[0].strip() or None
-        expected_tree_lines = fragment_lines[1:]
+        # In html5lib-tests, fragment tests generally specify the fragment
+        # context under `#document-fragment`, but the expected tree under
+        # `#document`.
+        expected_tree_lines = document_lines if document_lines else fragment_lines[1:]
         expected_tree = "\n".join(expected_tree_lines).strip("\n") if expected_tree_lines else ""
     elif document_lines:
         expected_tree = "\n".join(document_lines).strip("\n")
