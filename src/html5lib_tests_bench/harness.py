@@ -34,6 +34,10 @@ _PARSE_AND_SERIALIZE_DOCUMENT_JS = (
     "}"
 )
 
+_SERIALIZE_CURRENT_DOCUMENT_JS = (
+    f"() => {{\n  const serialize = {_DOM_TREE_SERIALIZER_JS};\n  return serialize(document);\n}}"
+)
+
 _FRAGMENT_TREE_SERIALIZER_DECL_JS = _read_js_resource("fragment_tree_serializer.js")
 _FRAGMENT_TREE_SERIALIZER_JS = (
     f"(() => {{\n{_FRAGMENT_TREE_SERIALIZER_DECL_JS}\n  return fragmentTreeSerializer;\n}})()"
@@ -115,13 +119,23 @@ class BrowserHarness:
             if self._pw_cm is not None:
                 self._pw_cm.__exit__(exc_type, exc, tb)
 
-    def run_document(self, *, html: str) -> BrowserResult:
+    def run_document(self, *, html: str, scripting_enabled: bool) -> BrowserResult:
         if self._page is None:
             raise RuntimeError("Harness not initialized")
 
         self._external_network_requests.clear()
-        # Fast path: parse/serialize in-memory via DOMParser to avoid navigation.
-        tree = str(self._page.evaluate(_PARSE_AND_SERIALIZE_DOCUMENT_JS, html) or "")
+        if scripting_enabled:
+            # Script-on mode: parse as a live document.
+            self._page.set_content(
+                html,
+                wait_until="domcontentloaded",
+                timeout=_MAX_PLAYWRIGHT_TIMEOUT_MS,
+            )
+            tree = str(self._page.evaluate(_SERIALIZE_CURRENT_DOCUMENT_JS) or "")
+        else:
+            # Script-off mode: DOMParser best matches html5lib-tests' script-off expectations,
+            # and avoids executing scripts.
+            tree = str(self._page.evaluate(_PARSE_AND_SERIALIZE_DOCUMENT_JS, html) or "")
         return BrowserResult(tree=tree, external_requests=list(self._external_network_requests))
 
     def run_fragment(self, *, fragment_context: str, html: str) -> BrowserResult:

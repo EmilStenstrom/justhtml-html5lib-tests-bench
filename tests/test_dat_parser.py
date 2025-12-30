@@ -28,6 +28,7 @@ def test_parse_basic_document_test() -> None:
     assert t.fragment_context is None
     assert t.expected_tree is not None
     assert "<html>" in t.expected_tree
+    assert t.scripting_enabled is False
 
 
 def test_parse_fragment_test_context_line() -> None:
@@ -48,6 +49,7 @@ def test_parse_fragment_test_context_line() -> None:
     assert t.fragment_context == "div"
     assert t.expected_tree is not None
     assert "<b>" in t.expected_tree
+    assert t.scripting_enabled is False
 
 
 def test_parse_fragment_context_with_expected_in_document_section() -> None:
@@ -71,6 +73,7 @@ def test_parse_fragment_context_with_expected_in_document_section() -> None:
     assert t.fragment_context == "svg path"
     assert t.expected_tree is not None
     assert "<nobr>" in t.expected_tree
+    assert t.scripting_enabled is False
 
 
 def test_parse_multiple_tests() -> None:
@@ -91,6 +94,44 @@ def test_parse_multiple_tests() -> None:
     tests = parse_html5lib_dat_text(text, source_file="x.dat")
     assert [t.data for t in tests] == ["One", "Two"]
     assert [t.index for t in tests] == [0, 1]
+    assert [t.scripting_enabled for t in tests] == [False, False]
+
+
+def test_parse_empty_data_block_is_empty_input() -> None:
+    # html5lib-tests uses an empty `#data` block to represent empty input.
+    text = textwrap.dedent(
+        """
+        #data
+        #document
+        | <html>
+        """
+    ).strip("\n")
+
+    tests = parse_html5lib_dat_text(text, source_file="x.dat")
+    assert len(tests) == 1
+    assert tests[0].data == ""
+
+
+def test_parse_script_on_off_directives() -> None:
+    text = textwrap.dedent(
+        """
+        #data
+        X
+        #script-off
+        #document
+        | <html>
+
+        #data
+        Y
+        #script-on
+        #document
+        | <html>
+        """
+    ).strip("\n")
+
+    tests = parse_html5lib_dat_text(text, source_file="x.dat")
+    assert [t.data for t in tests] == ["X", "Y"]
+    assert [t.scripting_enabled for t in tests] == [False, True]
 
 
 def test_parse_file_latin1_fallback(tmp_path: Path) -> None:
@@ -102,3 +143,4 @@ def test_parse_file_latin1_fallback(tmp_path: Path) -> None:
     tests = parse_html5lib_dat_file(p)
     assert len(tests) == 1
     assert "\u00fe" in tests[0].data
+    assert tests[0].scripting_enabled is False

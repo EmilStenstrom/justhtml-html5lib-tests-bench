@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     browsers = _browsers_from_arg(ns.browser)
 
     results: list[dict[str, Any]] = []
-    summary: dict[str, dict[str, int]] = {b: {"pass": 0, "fail": 0, "error": 0} for b in browsers}
+    summary: dict[str, dict[str, int]] = {b: {"pass": 0, "fail": 0, "error": 0, "skip": 0} for b in browsers}
 
     limit = int(ns.max_tests or 0)
 
@@ -107,14 +107,24 @@ def main(argv: list[str] | None = None) -> int:
                     "source_file": t.source_file,
                     "index": t.index,
                     "fragment_context": t.fragment_context,
+                    "scripting_enabled": t.scripting_enabled,
                 }
+
+                # html5lib-tests includes script-on cases. For this benchmark we want to
+                # focus on parser differences without executing scripts.
+                if t.scripting_enabled:
+                    rec["outcome"] = "skip"
+                    rec["skip_reason"] = "scripting_enabled"
+                    summary[browser]["skip"] += 1
+                    results.append(rec)
+                    continue
 
                 try:
                     if t.fragment_context:
                         r = h.run_fragment(fragment_context=t.fragment_context, html=t.data)
                     else:
                         # Render as a full document.
-                        r = h.run_document(html=t.data)
+                        r = h.run_document(html=t.data, scripting_enabled=t.scripting_enabled)
 
                     rec["actual_tree"] = r.tree
                     if r.external_requests:
@@ -187,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     # Print a compact summary
     for b in browsers:
         s = summary[b]
-        print(f"{b}: pass={s['pass']} fail={s['fail']} error={s['error']}")
+        print(f"{b}: pass={s['pass']} fail={s['fail']} error={s['error']} skipped={s['skip']}")
 
     elapsed_s = time.perf_counter() - started
     print(f"elapsed_seconds: {elapsed_s:.3f}")

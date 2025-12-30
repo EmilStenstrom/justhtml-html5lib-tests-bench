@@ -12,17 +12,22 @@ class Html5libDatTest:
     data: str
     expected_tree: str | None
     fragment_context: str | None
+    scripting_enabled: bool
 
 
 def _finalize_test(
     *,
     source_file: str,
     index: int,
+    saw_data: bool,
     data_lines: list[str],
     document_lines: list[str],
     fragment_lines: list[str],
+    scripting_enabled: bool,
 ) -> Html5libDatTest | None:
-    if not data_lines:
+    # html5lib-tests uses an empty `#data` block to represent empty input.
+    # Only skip entries that never started a test (i.e. no `#data` seen).
+    if not saw_data:
         return None
 
     data = "\n".join(data_lines)
@@ -46,6 +51,7 @@ def _finalize_test(
         data=data,
         expected_tree=expected_tree,
         fragment_context=fragment_context,
+        scripting_enabled=scripting_enabled,
     )
 
 
@@ -61,24 +67,30 @@ def parse_html5lib_dat_text(text: str, *, source_file: str = "<memory>") -> list
     tests: list[Html5libDatTest] = []
 
     section: str | None = None
+    saw_data = False
     data_lines: list[str] = []
     document_lines: list[str] = []
     fragment_lines: list[str] = []
 
     test_index = 0
+    default_scripting_enabled = False
+    current_test_scripting_enabled = default_scripting_enabled
 
     def flush() -> None:
-        nonlocal test_index, data_lines, document_lines, fragment_lines
+        nonlocal test_index, saw_data, data_lines, document_lines, fragment_lines, current_test_scripting_enabled
         t = _finalize_test(
             source_file=source_file,
             index=test_index,
+            saw_data=saw_data,
             data_lines=data_lines,
             document_lines=document_lines,
             fragment_lines=fragment_lines,
+            scripting_enabled=current_test_scripting_enabled,
         )
         if t is not None:
             tests.append(t)
             test_index += 1
+        saw_data = False
         data_lines = []
         document_lines = []
         fragment_lines = []
@@ -87,10 +99,28 @@ def parse_html5lib_dat_text(text: str, *, source_file: str = "<memory>") -> list
         line = raw.rstrip("\n")
         if line.startswith("#"):
             key = line[1:].strip().lower()
+
+            if key == "script-on":
+                if data_lines:
+                    current_test_scripting_enabled = True
+                else:
+                    default_scripting_enabled = True
+                section = None
+                continue
+            if key == "script-off":
+                if data_lines:
+                    current_test_scripting_enabled = False
+                else:
+                    default_scripting_enabled = False
+                section = None
+                continue
+
             # A new #data starts a new test.
             if key == "data":
-                if data_lines:
+                if saw_data:
                     flush()
+                current_test_scripting_enabled = default_scripting_enabled
+                saw_data = True
                 section = "data"
                 continue
             if key in {"document", "document-fragment"}:
