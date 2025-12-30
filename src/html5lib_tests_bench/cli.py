@@ -97,98 +97,130 @@ def main(argv: list[str] | None = None) -> int:
 
     browsers = _browsers_from_arg(ns.browser)
 
+    try:
+        import playwright  # type: ignore[import-not-found]
+
+        playwright_version = str(getattr(playwright, "__version__", ""))
+    except Exception:
+        playwright_version = ""
+
     results: list[dict[str, Any]] = []
     summary: dict[str, dict[str, int]] = {b: {"pass": 0, "fail": 0, "error": 0, "skip": 0} for b in browsers}
+    browser_versions: dict[str, str] = {}
+    browser_launch_errors: dict[str, str] = {}
 
     limit = int(ns.max_tests or 0)
 
     for browser in browsers:
-        with BrowserHarness(browser=browser, headless=True) as h:
-            for idx, t in enumerate(tests):
-                if limit and idx >= limit:
-                    break
+        try:
+            with BrowserHarness(browser=browser, headless=True) as h:
+                browser_versions[browser] = h.browser_version
+                for idx, t in enumerate(tests):
+                    if limit and idx >= limit:
+                        break
 
-                rec: dict[str, Any] = {
-                    "browser": browser,
-                    "source_file": t.source_file,
-                    "index": t.index,
-                    "fragment_context": t.fragment_context,
-                    "scripting_enabled": t.scripting_enabled,
-                }
+                    rec: dict[str, Any] = {
+                        "browser": browser,
+                        "browser_version": h.browser_version,
+                        "source_file": t.source_file,
+                        "index": t.index,
+                        "fragment_context": t.fragment_context,
+                        "scripting_enabled": t.scripting_enabled,
+                    }
 
-                # html5lib-tests includes script-on cases. For this benchmark we want to
-                # focus on parser differences without executing scripts.
-                if t.scripting_enabled:
-                    rec["outcome"] = "skip"
-                    rec["skip_reason"] = "scripting_enabled"
-                    summary[browser]["skip"] += 1
-                    results.append(rec)
-                    continue
+                    # html5lib-tests includes script-on cases. For this benchmark we want to
+                    # focus on parser differences without executing scripts.
+                    if t.scripting_enabled:
+                        rec["outcome"] = "skip"
+                        rec["skip_reason"] = "scripting_enabled"
+                        summary[browser]["skip"] += 1
+                        results.append(rec)
+                        continue
 
-                try:
-                    if t.fragment_context:
-                        r = h.run_fragment(fragment_context=t.fragment_context, html=t.data)
-                    else:
-                        # Render as a full document.
-                        r = h.run_document(html=t.data, scripting_enabled=t.scripting_enabled)
-
-                    rec["actual_tree"] = r.tree
-                    if r.external_requests:
-                        rec["external_requests"] = r.external_requests
-
-                    if ns.no_compare or t.expected_tree is None:
-                        rec["outcome"] = "recorded"
-                    else:
-                        expected = _normalize_expected_tree(t.expected_tree)
-                        actual = _normalize_expected_tree(r.tree)
-                        if actual == expected:
-                            rec["outcome"] = "pass"
-                            summary[browser]["pass"] += 1
+                    try:
+                        if t.fragment_context:
+                            r = h.run_fragment(fragment_context=t.fragment_context, html=t.data)
                         else:
-                            rec["outcome"] = "fail"
-                            summary[browser]["fail"] += 1
-                            rec["expected_tree"] = expected
+                            # Render as a full document.
+                            r = h.run_document(html=t.data, scripting_enabled=t.scripting_enabled)
 
-                            if ns.print_fails:
-                                loc = f"{t.source_file}#{t.index}"
-                                ctx = f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
-                                print(f"FAIL [{browser}] {loc}{ctx}", file=sys.stderr)
-                                diff = difflib.unified_diff(
-                                    expected.splitlines(),
-                                    actual.splitlines(),
-                                    fromfile="expected",
-                                    tofile="actual",
-                                    lineterm="",
-                                )
-                                max_lines = int(ns.max_diff_lines or 0)
-                                n = 0
-                                for line in diff:
-                                    if max_lines and n >= max_lines:
-                                        print("... (diff truncated)", file=sys.stderr)
-                                        break
-                                    print(line, file=sys.stderr)
-                                    n += 1
-                                print("", file=sys.stderr)
-                except Exception as exc:
-                    rec["outcome"] = "error"
-                    rec["error"] = f"{type(exc).__name__}: {exc}"
-                    summary[browser]["error"] += 1
+                        rec["actual_tree"] = r.tree
+                        if r.external_requests:
+                            rec["external_requests"] = r.external_requests
 
-                    if ns.print_errors:
-                        loc = f"{t.source_file}#{t.index}"
-                        ctx = f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
-                        print(
-                            f"ERROR [{browser}] {loc}{ctx}: {type(exc).__name__}: {exc}",
-                            file=sys.stderr,
-                        )
-                        print(traceback.format_exc().rstrip("\n"), end="\n\n", file=sys.stderr)
+                        if ns.no_compare or t.expected_tree is None:
+                            rec["outcome"] = "recorded"
+                        else:
+                            expected = _normalize_expected_tree(t.expected_tree)
+                            actual = _normalize_expected_tree(r.tree)
+                            if actual == expected:
+                                rec["outcome"] = "pass"
+                                summary[browser]["pass"] += 1
+                            else:
+                                rec["outcome"] = "fail"
+                                summary[browser]["fail"] += 1
+                                rec["expected_tree"] = expected
 
-                results.append(rec)
+                                if ns.print_fails:
+                                    loc = f"{t.source_file}#{t.index}"
+                                    ctx = f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
+                                    print(f"FAIL [{browser}] {loc}{ctx}", file=sys.stderr)
+                                    diff = difflib.unified_diff(
+                                        expected.splitlines(),
+                                        actual.splitlines(),
+                                        fromfile="expected",
+                                        tofile="actual",
+                                        lineterm="",
+                                    )
+                                    max_lines = int(ns.max_diff_lines or 0)
+                                    n = 0
+                                    for line in diff:
+                                        if max_lines and n >= max_lines:
+                                            print("... (diff truncated)", file=sys.stderr)
+                                            break
+                                        print(line, file=sys.stderr)
+                                        n += 1
+                                    print("", file=sys.stderr)
+                    except Exception as exc:
+                        rec["outcome"] = "error"
+                        rec["error"] = f"{type(exc).__name__}: {exc}"
+                        summary[browser]["error"] += 1
+
+                        if ns.print_errors:
+                            loc = f"{t.source_file}#{t.index}"
+                            ctx = f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
+                            print(
+                                f"ERROR [{browser}] {loc}{ctx}: {type(exc).__name__}: {exc}",
+                                file=sys.stderr,
+                            )
+                            print(traceback.format_exc().rstrip("\n"), end="\n\n", file=sys.stderr)
+
+                    results.append(rec)
+        except Exception as exc:
+            # Common case: Playwright browsers not installed (run: python -m playwright install).
+            browser_versions.setdefault(browser, "")
+            browser_launch_errors[browser] = f"{type(exc).__name__}: {exc}"
+            summary[browser]["error"] += 1
+            results.append(
+                {
+                    "browser": browser,
+                    "browser_version": browser_versions[browser],
+                    "outcome": "error",
+                    "error": browser_launch_errors[browser],
+                    "source_file": None,
+                    "index": None,
+                    "fragment_context": None,
+                    "scripting_enabled": None,
+                }
+            )
 
     out_obj = {
         "schema": "html5libtestsbench.results.v1",
         "meta": {
             "browsers": browsers,
+            "browser_versions": browser_versions,
+            "browser_launch_errors": browser_launch_errors,
+            "playwright_version": playwright_version,
             "paths": ns.paths,
             "max_tests": limit,
             "compare": not ns.no_compare,
@@ -203,7 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     # Print a compact summary
     for b in browsers:
         s = summary[b]
-        print(f"{b}: pass={s['pass']} fail={s['fail']} error={s['error']} skipped={s['skip']}")
+        v = browser_versions.get(b, "")
+        suffix = f" {v}" if v else ""
+        if b in browser_launch_errors:
+            print(f"{b}{suffix}: ERROR launching browser ({browser_launch_errors[b]})")
+        else:
+            print(f"{b}{suffix}: pass={s['pass']} fail={s['fail']} error={s['error']} skipped={s['skip']}")
 
     elapsed_s = time.perf_counter() - started
     print(f"elapsed_seconds: {elapsed_s:.3f}")

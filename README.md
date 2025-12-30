@@ -4,13 +4,13 @@ Runs the `html5lib-tests` parsing test corpus against real browser engines (via 
 
 ## Latest results
 
-Latest run (tree-construction, pass/(pass+fail)) — 2025-12-30:
+Latest run (`../html5lib-tests/**/*.dat`, pass/(pass+fail)) — 2025-12-30:
 
 | Engine | Tests Passed | Agreement | Notes |
 |--------|-------------|-----------|-------|
-| Chromium | 1763/1770 | 99.6% | 7 differing trees |
-| WebKit | 1741/1770 | 98.4% | 29 differing trees |
-| Firefox | 1727/1770 | 97.6% | 43 differing trees |
+| Chromium 143.0.7499.4 | 1763/1770 | 99.6% | 7 differing trees |
+| WebKit 26.0 | 1741/1770 | 98.4% | 29 differing trees |
+| Firefox 144.0.2 | 1727/1770 | 97.6% | 43 differing trees |
 
 Skipped: all engines skipped 12 scripting-enabled cases (`#script-on`).
 
@@ -24,7 +24,7 @@ This is meant for answering questions like:
 ```bash
 cd justhtml-html5lib-tests-bench
 python -m pip install -e ".[test]"
-python -m playwright install chromium
+python -m playwright install chromium firefox webkit
 pytest
 ```
 
@@ -62,6 +62,21 @@ Helpful flags:
 - `--browser all`: run Chromium + Firefox + WebKit
 - `--max-tests N`: limit for quick iteration
 - `--no-compare`: only record the actual tree (no pass/fail)
+
+### Browsers and versions
+
+The CLI prints the browser version together with the browser name, for example:
+
+```text
+chromium 143.0.7499.4: pass=... fail=... error=... skipped=...
+```
+
+Browser choices:
+
+- `chromium`, `firefox`, `webkit`: Playwright-managed engines.
+
+When using `--json-out`, versions are also included under `meta.browser_versions`.
+If a browser fails to launch, the error is recorded under `meta.browser_launch_errors`.
 
 ## Inspecting differences
 

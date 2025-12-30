@@ -71,6 +71,9 @@ class BrowserHarness:
         self._page: Any | None = None
         self._timeout_error: type[Exception] | None = None
 
+        self._browser_display_name: str | None = None
+        self._browser_version: str | None = None
+
         self._current_html: str = ""
         self._base_url: str = "http://html5libtests.local/"
         self._external_network_requests: list[str] = []
@@ -86,8 +89,16 @@ class BrowserHarness:
         self._pw_cm = sync_playwright()
         self._pw = self._pw_cm.__enter__()
 
-        browser_type = getattr(self._pw, self._browser_name)
-        self._browser_instance = browser_type.launch(headless=self._headless)
+        browser_type, launch_kwargs, display_name = self._resolve_playwright_browser(self._pw, self._browser_name)
+        self._browser_display_name = display_name
+        launch_kwargs = {**launch_kwargs, "headless": self._headless}
+        self._browser_instance = browser_type.launch(**launch_kwargs)
+        version_attr = getattr(self._browser_instance, "version", "")
+        try:
+            version_value = version_attr() if callable(version_attr) else version_attr
+        except Exception:
+            version_value = ""
+        self._browser_version = str(version_value or "")
         self._page = self._browser_instance.new_page()
 
         def _route(route) -> None:
@@ -110,6 +121,31 @@ class BrowserHarness:
             timeout=_MAX_PLAYWRIGHT_TIMEOUT_MS,
         )
         return self
+
+    @staticmethod
+    def _resolve_playwright_browser(pw: Any, browser: BrowserName) -> tuple[Any, dict[str, Any], str]:
+        launch_kwargs: dict[str, Any] = {}
+
+        if browser == "chromium":
+            return pw.chromium, {**launch_kwargs}, "chromium"
+        if browser == "firefox":
+            return pw.firefox, {**launch_kwargs}, "firefox"
+        if browser == "webkit":
+            return pw.webkit, {**launch_kwargs}, "webkit"
+
+        # Real, installed browsers via Playwright channels. These require the browser to be installed
+        # on the system (Playwright does not download them).
+        raise ValueError(f"Unknown browser: {browser}")
+
+    @property
+    def browser_display_name(self) -> str:
+        if self._browser_display_name is None:
+            return str(self._browser_name)
+        return self._browser_display_name
+
+    @property
+    def browser_version(self) -> str:
+        return self._browser_version or ""
 
     def __exit__(self, exc_type, exc, tb) -> None:
         try:
