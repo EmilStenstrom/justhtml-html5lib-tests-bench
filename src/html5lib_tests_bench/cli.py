@@ -59,6 +59,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print a unified diff for failing comparisons (to stderr)",
     )
+    p.add_argument(
+        "--max-diff-lines",
+        type=int,
+        default=200,
+        help="Max lines of unified diff to print per failure (0 = unlimited). Default: 200.",
+    )
     return p.parse_args(argv)
 
 
@@ -154,10 +160,10 @@ def main(argv: list[str] | None = None) -> int:
                                     tofile="actual",
                                     lineterm="",
                                 )
-                                max_lines = 200
+                                max_lines = int(ns.max_diff_lines or 0)
                                 n = 0
                                 for line in diff:
-                                    if n >= max_lines:
+                                    if max_lines and n >= max_lines:
                                         print("... (diff truncated)", file=sys.stderr)
                                         break
                                     print(line, file=sys.stderr)
@@ -211,3 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     if (not ns.no_compare) and any(summary[b]["fail"] for b in browsers):
         return 3
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
