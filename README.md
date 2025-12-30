@@ -16,6 +16,23 @@ python -m playwright install chromium
 pytest
 ```
 
+## Linting / formatting (pre-commit)
+
+This repo is set up with `pre-commit` hooks for:
+
+- Python: Ruff (minimal lint + formatting)
+- JavaScript + JSON: Biome
+
+Setup:
+
+```bash
+python -m pip install -e ".[dev,test]"
+pre-commit install
+pre-commit run --all-files
+```
+
+Note: the Biome hook requires a working Node.js installation.
+
 ## Running
 
 Point the CLI at one or more `html5lib-tests` `.dat` files (typically in `tree-construction/`):

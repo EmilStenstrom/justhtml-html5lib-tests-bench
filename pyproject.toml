@@ -27,7 +27,7 @@ package-dir = {"" = "src"}
 
 
 [tool.setuptools.package-data]
-html5lib_tests_bench = ["py.typed"]
+html5lib_tests_bench = ["py.typed", "js/*.js"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

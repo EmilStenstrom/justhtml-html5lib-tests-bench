@@ -20,4 +20,3 @@ repos:
     hooks:
       - id: biome-check
         files: "\\.(jsonc?|jsx?|tsx?)$"
-        exclude: "^vectors/payloadbox-xss-payload-list\\.json$"

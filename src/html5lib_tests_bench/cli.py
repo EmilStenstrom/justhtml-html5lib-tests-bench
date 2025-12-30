@@ -135,9 +135,7 @@ def main(argv: list[str] | None = None) -> int:
 
                             if ns.print_fails:
                                 loc = f"{t.source_file}#{t.index}"
-                                ctx = (
-                                    f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
-                                )
+                                ctx = f" fragment_context={t.fragment_context!r}" if t.fragment_context else ""
                                 print(f"FAIL [{browser}] {loc}{ctx}", file=sys.stderr)
                                 diff = difflib.unified_diff(
                                     expected.splitlines(),

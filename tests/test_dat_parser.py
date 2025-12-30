@@ -95,7 +95,7 @@ def test_parse_multiple_tests() -> None:
 
 def test_parse_file_latin1_fallback(tmp_path: Path) -> None:
     # Include a raw 0xFE byte to mirror html5lib-tests/encoding/*.dat.
-    raw = b"#data\n<script>alert(\"\xfe\")</script>\n#document\n| <html>\n"
+    raw = b'#data\n<script>alert("\xfe")</script>\n#document\n| <html>\n'
     p = tmp_path / "encoding.dat"
     p.write_bytes(raw)
 
